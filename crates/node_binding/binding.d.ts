@@ -147,6 +147,7 @@ export enum BuiltinPluginName {
   MergeDuplicateChunksPlugin = 'MergeDuplicateChunksPlugin',
   SplitChunksPlugin = 'SplitChunksPlugin',
   ShareRuntimePlugin = 'ShareRuntimePlugin',
+  CircularDependencyPlugin = 'CircularDependencyPlugin',
   ContainerPlugin = 'ContainerPlugin',
   ContainerReferencePlugin = 'ContainerReferencePlugin',
   ProvideSharedPlugin = 'ProvideSharedPlugin',
@@ -1058,6 +1059,15 @@ export interface RawLimitChunkCountPluginOptions {
   chunkOverhead?: number
   entryChunkMultiplicator?: number
   maxChunks: number
+}
+
+export interface RawCircularDependencyPluginOptions {
+  exclude?: RegExp;
+  include?: RegExp;
+  failOnError?: boolean;
+  allowAsyncCycles?: boolean;
+  onDetected?: boolean;
+  cwd?: string;
 }
 
 export interface RawModuleArg {
