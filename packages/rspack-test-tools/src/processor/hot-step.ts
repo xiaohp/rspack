@@ -2,7 +2,6 @@ import path from "node:path";
 import fs from "fs-extra";
 
 import type { Chunk } from "webpack";
-import { escapeEOL, escapeSep } from "../helper";
 import type { THotStepRuntimeData } from "../runner";
 import type {
 	ECompilerType,
@@ -197,7 +196,7 @@ export class HotSnapshotProcessor<
 		}> = [];
 		const hotUpdateManifest: Array<{ name: string; content: string }> = [];
 		const changedFiles: string[] = this.updateOptions.changedFiles.map(
-			(i: string) => escapeSep(path.relative(context.getSource(), i))
+			(i: string) => path.relative(context.getSource(), i)
 		);
 		changedFiles.sort();
 
@@ -401,6 +400,6 @@ ${runtime.javascript.disposedModules.map(i => `- ${i}`).join("\n")}
 
 				`.trim();
 
-		env.expect(escapeEOL(content)).toMatchFileSnapshot(snapshotPath);
+		env.expect(content).toMatchFileSnapshot(snapshotPath);
 	}
 }
