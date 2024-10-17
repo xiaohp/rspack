@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "fs-extra";
 
 import type { Chunk } from "webpack";
-import { escapeEOL, escapeSep, replacePaths } from "../helper";
+import { escapeEOL, escapeSep } from "../helper";
 import type { THotStepRuntimeData } from "../runner";
 import type {
 	ECompilerType,
@@ -14,6 +14,7 @@ import type {
 	TUpdateOptions
 } from "../type";
 import { HotProcessor, type IHotProcessorOptions } from "./hot";
+import { normalizePlaceholder } from "../helper/expect/placeholder";
 
 const NOOP_SET = new Set();
 
@@ -223,7 +224,7 @@ export class HotSnapshotProcessor<
 		}
 
 		const replaceContent = (str: string) => {
-			return replacePaths(
+			return normalizePlaceholder(
 				Object.entries(hashes)
 					.reduce((str, [raw, replacement]) => {
 						return str.split(raw).join(replacement);
