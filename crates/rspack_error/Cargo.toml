@@ -20,5 +20,5 @@ rspack_paths       = { version = "0.1.0", path = "../rspack_paths" }
 swc_core           = { workspace = true, features = ["common", "common_concurrent"] }
 termcolor          = "1"
 textwrap           = "0.15.2"
-thiserror          = "1"
+thiserror          = "2.0.3"
 unicode-width      = "0.2.0"
