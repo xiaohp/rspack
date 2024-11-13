@@ -1863,7 +1863,21 @@ interface ExecuteModuleContext {
 }
 
 // @public
+export type ExperimentCacheOptions = boolean | {
+    type: "disable" | "memory";
+} | {
+    type: "persistent";
+    snapshot: {
+        immutablePaths: Array<string | RegExp>;
+        unmanagedPaths: Array<string | RegExp>;
+        managedPaths: Array<string | RegExp>;
+    };
+    storage: Array<{}>;
+};
+
+// @public
 export type Experiments = {
+    cache?: ExperimentCacheOptions;
     lazyCompilation?: boolean | LazyCompilationOptions;
     asyncWebAssembly?: boolean;
     outputModule?: boolean;
@@ -1893,6 +1907,8 @@ interface Experiments_2 {
 export interface ExperimentsNormalized {
     // (undocumented)
     asyncWebAssembly?: boolean;
+    // (undocumented)
+    cache: ExperimentCacheOptions;
     // (undocumented)
     css?: boolean;
     // (undocumented)
@@ -5195,6 +5211,7 @@ declare namespace rspackExports {
         OptimizationSplitChunksCacheGroup,
         OptimizationSplitChunksOptions,
         Optimization,
+        ExperimentCacheOptions,
         RspackFutureOptions,
         LazyCompilationOptions,
         Incremental,
@@ -10339,6 +10356,7 @@ declare namespace t {
         OptimizationSplitChunksCacheGroup,
         OptimizationSplitChunksOptions,
         Optimization,
+        ExperimentCacheOptions,
         RspackFutureOptions,
         LazyCompilationOptions,
         Incremental,
