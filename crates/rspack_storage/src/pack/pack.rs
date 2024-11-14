@@ -57,18 +57,6 @@ impl Pack {
     }
   }
 
-  pub fn write(&self, fs: &PackStorageFs) -> Result<()> {
-    let keys = self.keys.expect_value();
-    let contents = self.contents.expect_value();
-    if keys.len() != contents.len() {
-      return Err(error!("pack keys and contents length not match"));
-    }
-
-    fs.write_pack(&self.path, keys, contents)?;
-
-    Ok(())
-  }
-
   pub fn loaded(&self) -> bool {
     matches!(self.keys, PackKeysState::Value(_))
       && matches!(self.contents, PackContentsState::Value(_))
@@ -94,14 +82,4 @@ pub fn get_pack_hash(path: &PathBuf, keys: &PackKeys, fs: &PackStorageFs) -> Res
   hasher.write(file_hash.as_bytes());
 
   Ok(format!("{:016x}", hasher.finish()))
-}
-
-pub fn validate_pack(
-  hash: &str,
-  path: &PathBuf,
-  keys: &PackKeys,
-  fs: &PackStorageFs,
-) -> Result<bool> {
-  let pack_hash = get_pack_hash(path, keys, fs)?;
-  Ok(*hash == pack_hash)
 }

@@ -10,7 +10,7 @@ mod test_storage {
   use rspack_error::{error, Result};
   use rspack_storage::{PackStorage, PackStorageOptions, Storage};
   use rustc_hash::FxHasher;
-  use tokio::time::sleep;
+  use tokio::{runtime::Handle, task::JoinSet, time::sleep};
 
   #[test]
   fn test_basic() {
@@ -54,7 +54,7 @@ mod test_storage {
       ));
 
       // NOTICE: 5000 will block the test
-      for idx in 0..100 {
+      for idx in 0..5000 {
         storage.set(
           "scope_name",
           create_key(format!("item_key:{}", idx.to_string()))
@@ -139,7 +139,7 @@ mod test_storage {
     // NOTICE: 300 will block the test
     // async fn test_parallel() {
     //   let mut tasks = vec![];
-    //   for bucket_id in 0..100 {
+    //   for bucket_id in 0..300 {
     //     tasks.push(
     //       tokio::spawn(async move {
     //         sleep(Duration::from_millis(100)).await;
@@ -148,8 +148,7 @@ mod test_storage {
     //       .map_err(|e| error!("{}", e)),
     //     );
     //   }
-
-    //   let task_results = block_on(join_all(tasks))
+    //   let task_results = block_on(tokio::task::unconstrained(join_all(tasks)))
     //     .into_iter()
     //     .collect::<Result<Vec<(i32, i32)>>>();
     //   println!("task restuls: {:?}", task_results);

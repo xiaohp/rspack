@@ -15,3 +15,9 @@ pub use scope::*;
 
 mod fs;
 pub use fs::*;
+
+mod r#async;
+pub use r#async::*;
+
+mod bucket;
+pub use bucket::*;

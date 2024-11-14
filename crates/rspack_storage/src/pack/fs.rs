@@ -7,7 +7,6 @@ use std::{
   sync::Arc,
 };
 
-use futures::{executor::block_on, future::join_all};
 use itertools::Itertools;
 use rspack_error::{error, Result};
 use rustc_hash::FxHasher;
@@ -17,13 +16,16 @@ use super::{PackContents, PackFileMeta, PackKeys, ScopeMeta};
 #[derive(Debug, Clone)]
 pub struct PackStorageFs {
   // TODO: input/output file system
-  pub temp_root: PathBuf,
-  pub root: PathBuf,
+  pub temp_root: Arc<PathBuf>,
+  pub root: Arc<PathBuf>,
 }
 
 impl PackStorageFs {
   pub fn new(root: PathBuf, temp_root: PathBuf) -> Self {
-    Self { root, temp_root }
+    Self {
+      root: Arc::new(root),
+      temp_root: Arc::new(temp_root),
+    }
   }
 
   pub fn ensure_root(&self) -> Result<()> {
@@ -34,7 +36,7 @@ impl PackStorageFs {
 
   pub fn redirect_to_temp(&self, path: &PathBuf) -> Result<PathBuf> {
     let relative_path = path
-      .strip_prefix(&self.root)
+      .strip_prefix(&*self.root)
       .map_err(|e| error!("failed to get relative path: {}", e))?;
     Ok(self.temp_root.join(relative_path))
   }
@@ -308,56 +310,28 @@ impl PackStorageFs {
     }))
   }
 
-  pub fn move_temporary(
-    &self,
-    writed_files: &Vec<PathBuf>,
-    removed_files: &Vec<PathBuf>,
-  ) -> Result<()> {
-    let mut tasks = vec![];
-    println!("writed files: {:?}", writed_files);
-    println!("removed files: {:?}", removed_files);
-
-    async fn handle_file(file: &PathBuf, fs: &PackStorageFs, is_removed: bool) -> Result<()> {
-      if is_removed {
-        if file.exists() {
-          return tokio::fs::remove_file(file)
-            .await
-            .map_err(|e| error!("{}", e));
-        }
-      } else {
-        let temp_file = fs.redirect_to_temp(file)?;
-        if temp_file.exists() {
-          tokio::fs::create_dir_all(file.parent().expect("should have parent"))
-            .await
-            .map_err(|e: std::io::Error| error!("{}", e))?;
-
-          return tokio::fs::rename(&temp_file, file)
-            .await
-            .map_err(|e| error!("{}", e));
-        }
-      }
+  pub async fn remove_file(&self, path: &PathBuf) -> Result<()> {
+    if path.exists() {
+      tokio::fs::remove_file(&path)
+        .await
+        .map_err(|e| error!("{}", e))
+    } else {
       Ok(())
     }
+  }
 
-    for file in writed_files {
-      self.ensure_dir(&PathBuf::from(file.parent().expect("should have parent")))?;
-      let temp_file = self.redirect_to_temp(file)?;
-      if temp_file.exists() {
-        std::fs::rename(temp_file, file).map_err(|e| error!("{}", e))?;
-      }
+  pub async fn move_file(&self, path: &PathBuf) -> Result<()> {
+    let from = self.redirect_to_temp(path)?;
+    if from.exists() {
+      tokio::fs::create_dir_all(path.parent().expect("should have parent"))
+        .await
+        .map_err(|e: std::io::Error| error!("{}", e))?;
+      tokio::fs::rename(&from, &path)
+        .await
+        .map_err(|e| error!("{}", e))
+    } else {
+      Ok(())
     }
-
-    for file in removed_files {
-      tasks.push(handle_file(file, &self, true));
-    }
-
-    println!("start handle files");
-    block_on(join_all(tasks))
-      .into_iter()
-      .collect::<Result<Vec<()>>>()?;
-
-    println!("end handle files");
-    Ok(())
   }
 
   pub fn clean_cache(&self) -> Result<()> {

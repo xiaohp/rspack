@@ -3,12 +3,16 @@ use std::{
   sync::{Arc, Mutex},
 };
 
-use itertools::Itertools;
+use futures::executor::block_on;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rspack_error::{error, Result};
 use rustc_hash::FxHashMap as HashMap;
+use tokio::task::unconstrained;
 
-use super::{PackScope, PackStorageFs, PackStorageOptions, SavedScopeResult, ScopeValidateResult};
+use super::{
+  batch_move_files, batch_remove_files, PackScope, PackStorageFs, PackStorageOptions,
+  SavedScopeResult, ScopeValidateResult,
+};
 use crate::Storage;
 
 #[derive(Debug)]
@@ -67,6 +71,7 @@ impl Storage for PackStorage {
   fn idle(&self) -> Result<()> {
     let updates = std::mem::replace(&mut *self.scope_updates.lock().unwrap(), Default::default());
     let mut scopes = self.scopes.lock().expect("should get mutex scopes lock");
+
     for (scope_name, _) in updates.iter() {
       scopes
         .entry(scope_name)
@@ -74,8 +79,8 @@ impl Storage for PackStorage {
     }
 
     // prepare
-    self.fs.clean_temporary()?;
-    self.fs.ensure_root()?;
+    block_on(unconstrained(async move { before_save(&self.fs).await }))
+      .map_err(|e| error!("{}", e))?;
 
     // write scopes
     let mut tasks = vec![];
@@ -84,26 +89,42 @@ impl Storage for PackStorage {
       tasks.push((scope, scope_updates));
     }
 
-    let save_results = tasks
+    let (writed_files, removed_files) = tasks
       .into_par_iter()
       .map(move |(mut scope, mut scope_updates)| scope.save(&mut scope_updates, &self.fs))
-      .collect::<Result<Vec<SavedScopeResult>>>()?;
+      .collect::<Result<Vec<SavedScopeResult>>>()?
+      .into_iter()
+      .fold((vec![], vec![]), |mut acc, s| {
+        acc.0.extend(s.writed_files);
+        acc.1.extend(s.removed_files);
+        acc
+      });
 
     // move temp to cache root
-    self.fs.move_temporary(
-      &save_results
-        .iter()
-        .map(|s| s.writed_files.to_owned())
-        .flatten()
-        .collect_vec(),
-      &save_results
-        .iter()
-        .map(|s| s.removed_files.to_owned())
-        .flatten()
-        .collect_vec(),
-    )?;
-    // self.fs.clean_temporary()?;
+    block_on(unconstrained(async move {
+      after_save(writed_files, removed_files, &self.fs).await
+    }))
+    .map_err(|e| error!("{}", e))?;
 
     Ok(())
   }
+}
+
+async fn before_save(fs: &PackStorageFs) -> Result<()> {
+  fs.clean_temporary()?;
+  fs.ensure_root()?;
+  Ok(())
+}
+
+async fn after_save(
+  writed_files: Vec<PathBuf>,
+  removed_files: Vec<PathBuf>,
+  fs: &PackStorageFs,
+) -> Result<()> {
+  batch_move_files(writed_files, &fs).await?;
+  batch_remove_files(removed_files, &fs).await?;
+
+  fs.clean_temporary()?;
+  // self.fs.clean_temporary()?;
+  Ok(())
 }
