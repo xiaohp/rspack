@@ -1,23 +1,32 @@
-use std::sync::Mutex;
+use std::{
+  path::PathBuf,
+  sync::{Arc, Mutex},
+};
 
+use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rspack_error::{error, Result};
 use rustc_hash::FxHashMap as HashMap;
 
-use super::{save_scope, PackScope, PackStorageOptions};
+use super::{PackScope, PackStorageFs, PackStorageOptions, SavedScopeResult, ScopeValidateResult};
 use crate::Storage;
 
 #[derive(Debug)]
 pub struct PackStorage {
+  root: PathBuf,
+  fs: PackStorageFs,
   options: PackStorageOptions,
   scopes: Mutex<HashMap<&'static str, PackScope>>,
   scope_updates: Mutex<HashMap<&'static str, HashMap<Vec<u8>, Option<Vec<u8>>>>>,
 }
 
 impl PackStorage {
-  pub fn new(options: PackStorageOptions) -> Self {
+  pub fn new(root: PathBuf, temp: PathBuf, options: PackStorageOptions) -> Self {
+    let fs = PackStorageFs::new(root.clone(), temp.clone());
     Self {
+      root,
       options,
+      fs,
       scopes: Default::default(),
       scope_updates: Default::default(),
     }
@@ -25,18 +34,24 @@ impl PackStorage {
 }
 
 impl Storage for PackStorage {
-  fn get_all(&self, name: &'static str) -> Result<Vec<(&Vec<u8>, &Vec<u8>)>> {
+  fn get_all(&self, name: &'static str) -> Result<Vec<(Arc<Vec<u8>>, Arc<Vec<u8>>)>> {
     let mut scopes = self.scopes.lock().unwrap();
     let scope = scopes
       .entry(name)
-      .or_insert_with(|| PackScope::new(self.options.location.join(name)));
+      .or_insert_with(|| PackScope::new(name, &self.root, self.options.clone()));
 
-    let is_valid = scope.validate(&self.options)?;
-    if is_valid {
-      // scope.get_contents()
-      Err(error!("scope"))
-    } else {
-      Err(error!("scope is inconsistent"))
+    match scope.validate(&self.options, &self.fs) {
+      Ok(validate) => match validate {
+        ScopeValidateResult::Valid => scope.get_contents(&self.fs),
+        ScopeValidateResult::Invalid(reason) => {
+          scopes.clear();
+          Err(error!("cache is not validate: {}", reason))
+        }
+      },
+      Err(e) => {
+        scopes.clear();
+        Err(error!("cache is not validate: {}", e))
+      }
     }
   }
   fn set(&self, scope: &'static str, key: Vec<u8>, value: Vec<u8>) {
@@ -50,40 +65,45 @@ impl Storage for PackStorage {
     scope_map.insert(key.to_vec(), None);
   }
   fn idle(&self) -> Result<()> {
-    let options = self.options.clone();
-    let mut updates =
-      std::mem::replace(&mut *self.scope_updates.lock().unwrap(), Default::default());
-    let mut scopes = std::mem::replace(&mut *self.scopes.lock().unwrap(), Default::default());
-    for (scope_name, _) in &updates {
+    let updates = std::mem::replace(&mut *self.scope_updates.lock().unwrap(), Default::default());
+    let mut scopes = self.scopes.lock().expect("should get mutex scopes lock");
+    for (scope_name, _) in updates.iter() {
       scopes
         .entry(scope_name)
-        .or_insert_with(|| PackScope::new(self.options.location.join(scope_name)));
+        .or_insert_with(|| PackScope::empty(scope_name, &self.root, self.options.clone()));
     }
 
-    let new_scopes = save(&mut scopes, &mut updates, options)?;
-    std::mem::replace(&mut *self.scopes.lock().unwrap(), new_scopes);
+    // prepare
+    self.fs.clean_temporary()?;
+    self.fs.ensure_root()?;
+
+    // write scopes
+    let mut tasks = vec![];
+    for (scope_name, scope_updates) in updates {
+      let scope = scopes.remove(scope_name).expect("should have scope");
+      tasks.push((scope, scope_updates));
+    }
+
+    let save_results = tasks
+      .into_par_iter()
+      .map(move |(mut scope, mut scope_updates)| scope.save(&mut scope_updates, &self.fs))
+      .collect::<Result<Vec<SavedScopeResult>>>()?;
+
+    // move temp to cache root
+    self.fs.move_temporary(
+      &save_results
+        .iter()
+        .map(|s| s.writed_files.to_owned())
+        .flatten()
+        .collect_vec(),
+      &save_results
+        .iter()
+        .map(|s| s.removed_files.to_owned())
+        .flatten()
+        .collect_vec(),
+    )?;
+    // self.fs.clean_temporary()?;
+
     Ok(())
   }
-}
-
-fn save(
-  scopes: &mut HashMap<&'static str, PackScope>,
-  updates: &mut HashMap<&'static str, HashMap<Vec<u8>, Option<Vec<u8>>>>,
-  options: PackStorageOptions,
-) -> Result<HashMap<&'static str, PackScope>> {
-  let mut tasks = vec![];
-
-  for (scope_name, map) in updates {
-    let scope = scopes.remove(scope_name).unwrap_or_else(|| unreachable!());
-    tasks.push((scope_name, map, scope));
-  }
-
-  let new_scopes = tasks
-    .into_par_iter()
-    .map(move |(scope_name, mut map, mut scope)| {
-      save_scope(scope_name, &mut scope, &mut map, &options)
-    })
-    .collect::<Result<HashMap<&'static str, PackScope>>>()?;
-
-  Ok(new_scopes)
 }
