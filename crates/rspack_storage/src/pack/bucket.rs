@@ -5,87 +5,14 @@ use rspack_error::Result;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet, FxHasher};
 use tokio::task::unconstrained;
 
-use super::{batch_write_packs, Pack, PackFileMeta, PackStorageFs, PackStorageOptions};
-use crate::pack::{get_pack_name, PackContents, PackContentsState, PackKeys, PackKeysState};
+use super::{batch_write_packs, fill_packs, Pack, PackFileMeta, PackStorageFs, PackStorageOptions};
+use crate::pack::{PackContentsState, PackKeysState};
 
 pub fn choose_bucket(key: &Vec<u8>, total: usize) -> usize {
   let mut hasher = FxHasher::default();
   hasher.write(key);
   let bucket_id = usize::try_from(hasher.finish() % total as u64).expect("should get bucket id");
   bucket_id
-}
-
-fn generate_bucket_packs(
-  items: &mut Vec<(Arc<Vec<u8>>, Arc<Vec<u8>>)>,
-  dir: &PathBuf,
-  options: &PackStorageOptions,
-) -> Vec<(PackFileMeta, Pack)> {
-  println!("new packs items: {:?}", items.len());
-  items.sort_unstable_by(|a, b| a.1.len().cmp(&b.1.len()));
-
-  let mut new_packs = vec![];
-
-  fn create_pack(dir: &PathBuf, keys: PackKeys, contents: PackContents) -> (PackFileMeta, Pack) {
-    let file_name = get_pack_name(&keys);
-    let mut new_pack = Pack::new(dir.join(file_name.clone()));
-    new_pack.keys = PackKeysState::Value(keys);
-    new_pack.contents = PackContentsState::Value(contents);
-    (
-      PackFileMeta {
-        name: file_name,
-        hash: Default::default(),
-      },
-      new_pack,
-    )
-  }
-
-  loop {
-    if items.len() == 0 {
-      break;
-    }
-    // handle big single cache
-    if items.last().expect("should have first item").1.len() as f64
-      > options.max_pack_size as f64 * 0.5_f64
-    {
-      let (key, value) = items.pop().expect("shoud have first item");
-      new_packs.push(create_pack(dir, vec![key], vec![value]));
-    } else {
-      break;
-    }
-  }
-
-  loop {
-    let mut batch_keys: PackKeys = vec![];
-    let mut batch_contents: PackContents = vec![];
-    let mut batch_size = 0_usize;
-
-    loop {
-      if items.len() == 0 {
-        break;
-      }
-
-      if batch_size + items.last().expect("should have first item").1.len() > options.max_pack_size
-      {
-        break;
-      }
-
-      let (key, value) = items.pop().expect("shoud have first item");
-      batch_size += value.len();
-      batch_keys.push(key);
-      batch_contents.push(value);
-    }
-
-    if !batch_keys.is_empty() {
-      new_packs.push(create_pack(dir, batch_keys, batch_contents));
-    }
-
-    if items.len() == 0 {
-      break;
-    }
-  }
-
-  println!("new packs: {:?}", new_packs.len());
-  new_packs
 }
 
 pub struct CreateBucketPacksResult {
@@ -187,8 +114,7 @@ pub fn incremental_bucket_packs(
     .map(|(meta, pack)| (meta.clone(), pack.to_owned()))
     .collect::<Vec<_>>();
 
-  let new_packs: Vec<(PackFileMeta, Pack)> =
-    generate_bucket_packs(&mut wait_items, &bucket_path, &options);
+  let new_packs: Vec<(PackFileMeta, Pack)> = fill_packs(&mut wait_items, &bucket_path, &options);
 
   CreateBucketPacksResult {
     new_packs,
