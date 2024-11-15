@@ -1,11 +1,11 @@
 use std::{hash::Hasher, path::PathBuf, sync::Arc};
 
-use pollster::block_on;
 use rspack_error::Result;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet, FxHasher};
-use tokio::task::unconstrained;
 
-use super::{batch_write_packs, fill_packs, Pack, PackFileMeta, PackStorageFs, PackStorageOptions};
+use crate::pack::{
+  batch_write_packs, fill_packs, Pack, PackFileMeta, PackStorageFs, PackStorageOptions,
+};
 use crate::pack::{PackContentsState, PackKeysState};
 
 pub fn choose_bucket(key: &Vec<u8>, total: usize) -> usize {
@@ -129,12 +129,12 @@ pub struct WriteBucketResult {
   pub pack: Pack,
 }
 
-pub fn write_bucket_packs(
+pub async fn write_bucket_packs(
   metas: Vec<(usize, PackFileMeta)>,
   packs: Vec<Pack>,
-  fs: &PackStorageFs,
+  fs: Arc<PackStorageFs>,
 ) -> Result<Vec<WriteBucketResult>> {
-  let write_results = block_on(unconstrained(batch_write_packs(packs, &fs)))?;
+  let write_results = batch_write_packs(packs, fs).await?;
   let mut res = vec![];
   for ((bucket_id, mut meta), (hash, pack)) in metas.into_iter().zip(write_results.into_iter()) {
     meta.hash = hash;

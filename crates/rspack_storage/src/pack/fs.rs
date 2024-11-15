@@ -16,16 +16,13 @@ use super::{PackContents, PackFileMeta, PackKeys, ScopeMeta};
 #[derive(Debug, Clone)]
 pub struct PackStorageFs {
   // TODO: input/output file system
-  pub temp_root: Arc<PathBuf>,
-  pub root: Arc<PathBuf>,
+  pub temp_root: PathBuf,
+  pub root: PathBuf,
 }
 
 impl PackStorageFs {
   pub fn new(root: PathBuf, temp_root: PathBuf) -> Self {
-    Self {
-      root: Arc::new(root),
-      temp_root: Arc::new(temp_root),
-    }
+    Self { root, temp_root }
   }
 
   pub fn ensure_root(&self) -> Result<()> {
@@ -289,6 +286,7 @@ impl PackStorageFs {
               Ok(Arc::new(PackFileMeta {
                 name: info[0].to_owned(),
                 hash: info[1].to_owned(),
+                writed: true,
               }))
             }
           })

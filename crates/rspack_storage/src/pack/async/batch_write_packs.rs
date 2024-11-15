@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use futures::{future::join_all, TryFutureExt};
 use rspack_error::{error, Result};
 
 use crate::pack::{get_pack_hash, Pack, PackStorageFs};
 
-async fn save_pack(pack: Pack, fs: &PackStorageFs) -> Result<(String, Pack)> {
+async fn save_pack(pack: Pack, fs: Arc<PackStorageFs>) -> Result<(String, Pack)> {
   let keys = pack.keys.expect_value();
   let contents = pack.contents.expect_value();
   if keys.len() != contents.len() {
@@ -20,11 +22,11 @@ async fn save_pack(pack: Pack, fs: &PackStorageFs) -> Result<(String, Pack)> {
 
 pub async fn batch_write_packs(
   packs: Vec<Pack>,
-  fs: &PackStorageFs,
+  fs: Arc<PackStorageFs>,
 ) -> Result<Vec<(String, Pack)>> {
   let tasks = packs.into_iter().map(|pack| {
-    let fs = fs.to_owned();
-    tokio::spawn(async move { save_pack(pack, &fs).await }).map_err(|e| error!("{}", e))
+    let fs = fs.clone();
+    tokio::spawn(async move { save_pack(pack, fs).await }).map_err(|e| error!("{}", e))
   });
 
   let writed = join_all(tasks)

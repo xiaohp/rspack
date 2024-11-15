@@ -1,11 +1,5 @@
-mod meta;
-pub use meta::*;
-
 mod storage;
 pub use storage::*;
-
-mod options;
-pub use options::*;
 
 mod pack;
 pub use pack::*;
@@ -19,5 +13,5 @@ pub use fs::*;
 mod r#async;
 pub use r#async::*;
 
-mod bucket;
-pub use bucket::*;
+mod manager;
+pub use manager::*;

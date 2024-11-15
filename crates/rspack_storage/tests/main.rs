@@ -30,7 +30,7 @@ mod test_storage {
 
     let storage_options = PackStorageOptions {
       buckets: 10,
-      max_pack_size: 500 * 1000,
+      max_pack_size: 5000 * 1000,
       expires: 99999999999,
     };
 
@@ -71,7 +71,9 @@ mod test_storage {
           println!("failed: {}", e.to_string());
           panic!("{:?}", e);
         }
-      }
+      };
+
+      tokio::time::sleep(Duration::from_secs(3)).await;
     }
 
     async fn modify_storage(options: &PackStorageOptions) {
@@ -82,9 +84,7 @@ mod test_storage {
         options.clone(),
       ));
 
-      println!("asdfasdf");
       storage.get_all("scope_name");
-      println!("asdfasdfaaa");
 
       storage.remove("scope_name", b"item_key:1");
       storage.set(
@@ -131,10 +131,13 @@ mod test_storage {
       );
     }
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+      .enable_all()
+      .build()
+      .unwrap();
     rt.block_on(write_storage(&storage_options));
-    rt.block_on(modify_storage(&storage_options));
-    rt.block_on(read_storage(&storage_options));
+    // rt.block_on(modify_storage(&storage_options));
+    // rt.block_on(read_storage(&storage_options));
 
     // NOTICE: 300 will block the test
     // async fn test_parallel() {

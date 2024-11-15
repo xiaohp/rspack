@@ -1,9 +1,9 @@
 use std::{hash::Hasher, path::PathBuf, sync::Arc};
 
-use rspack_error::{error, Result};
+use rspack_error::Result;
 use rustc_hash::FxHasher;
 
-use super::{PackFileMeta, PackStorageFs, PackStorageOptions};
+use crate::pack::{PackFileMeta, PackStorageFs, PackStorageOptions};
 
 pub type PackKeys = Vec<Arc<Vec<u8>>>;
 
@@ -63,7 +63,7 @@ impl Pack {
   }
 }
 
-pub fn get_pack_name(keys: &PackKeys) -> String {
+fn get_pack_name(keys: &PackKeys) -> String {
   let mut hasher = FxHasher::default();
   for k in keys {
     hasher.write(k);
@@ -73,7 +73,7 @@ pub fn get_pack_name(keys: &PackKeys) -> String {
   format!("{:016x}", hasher.finish())
 }
 
-pub fn get_pack_hash(path: &PathBuf, keys: &PackKeys, fs: &PackStorageFs) -> Result<String> {
+pub fn get_pack_hash(path: &PathBuf, keys: &PackKeys, fs: Arc<PackStorageFs>) -> Result<String> {
   let mut hasher = FxHasher::default();
   let file_name = get_pack_name(keys);
   hasher.write(file_name.as_bytes());
@@ -89,7 +89,6 @@ pub fn fill_packs(
   dir: &PathBuf,
   options: &PackStorageOptions,
 ) -> Vec<(PackFileMeta, Pack)> {
-  println!("new packs items: {:?}", items.len());
   items.sort_unstable_by(|a, b| a.1.len().cmp(&b.1.len()));
 
   let mut new_packs = vec![];
@@ -103,6 +102,7 @@ pub fn fill_packs(
       PackFileMeta {
         name: file_name,
         hash: Default::default(),
+        writed: false,
       },
       new_pack,
     )

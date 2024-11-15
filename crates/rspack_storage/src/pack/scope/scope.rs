@@ -1,23 +1,24 @@
 use std::{
-  hash::Hasher,
   path::PathBuf,
   sync::Arc,
   time::{SystemTime, UNIX_EPOCH},
 };
 
-use futures::{executor::block_on, future::join_all, TryFutureExt};
+use futures::executor::block_on;
 use itertools::Itertools;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rspack_error::{error, Result};
-use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet, FxHasher};
-use tokio::{runtime::Handle, task::unconstrained};
+use rustc_hash::FxHashMap as HashMap;
+use tokio::task::unconstrained;
 
-use super::{
-  batch_validate, batch_write_packs, choose_bucket, incremental_bucket_packs, write_bucket_packs,
-  Pack, PackContents, PackContentsState, PackFileMeta, PackStorageFs, PackStorageOptions,
-  PackValidateCandidate, ScopeMeta,
+use crate::pack::{
+  batch_read_contents, batch_read_keys, batch_validate, choose_bucket, incremental_bucket_packs,
+  write_bucket_packs, PackKeysState,
 };
-use crate::pack::{batch_read_contents, batch_read_keys, PackKeys, PackKeysState};
+use crate::pack::{
+  Pack, PackContentsState, PackFileMeta, PackStorageFs, PackStorageOptions, PackValidateCandidate,
+  ScopeMeta,
+};
 
 #[derive(Debug)]
 pub enum ScopeValidateResult {
@@ -80,30 +81,30 @@ impl ScopePacksState {
 #[derive(Debug, Clone)]
 pub struct PackScope {
   pub name: &'static str,
-  pub path: PathBuf,
-  pub options: PackStorageOptions,
+  pub path: Arc<PathBuf>,
+  pub options: Arc<PackStorageOptions>,
   pub meta: ScopeMetaState,
   pub packs: ScopePacksState,
 }
 
 impl PackScope {
-  pub fn new(name: &'static str, dir: &PathBuf, options: PackStorageOptions) -> Self {
+  pub fn new(name: &'static str, dir: &PathBuf, options: Arc<PackStorageOptions>) -> Self {
     Self {
       name,
-      path: dir.join(name),
+      path: Arc::new(dir.join(name)),
       options,
       meta: ScopeMetaState::Pending,
       packs: ScopePacksState::Pending,
     }
   }
 
-  pub fn empty(name: &'static str, dir: &PathBuf, options: PackStorageOptions) -> Self {
+  pub fn empty(name: &'static str, dir: &PathBuf, options: Arc<PackStorageOptions>) -> Self {
     let scope_path = dir.join(name);
-    let meta = ScopeMeta::new(&scope_path, &options);
+    let meta = ScopeMeta::new(&scope_path, options.clone());
     let packs = vec![vec![]; options.buckets];
     Self {
       name,
-      path: scope_path,
+      path: Arc::new(scope_path),
       options,
       meta: ScopeMetaState::Value(meta),
       packs: ScopePacksState::Value(packs),
@@ -121,7 +122,10 @@ impl PackScope {
         .all(|pack| pack.loaded())
   }
 
-  pub fn get_contents(&mut self, fs: &PackStorageFs) -> Result<Vec<(Arc<Vec<u8>>, Arc<Vec<u8>>)>> {
+  pub fn get_contents(
+    &mut self,
+    fs: Arc<PackStorageFs>,
+  ) -> Result<Vec<(Arc<Vec<u8>>, Arc<Vec<u8>>)>> {
     self.ensure_pack_contents(fs)?;
 
     let packs = self.packs.expect_value();
@@ -153,9 +157,9 @@ impl PackScope {
   pub fn validate(
     &mut self,
     options: &PackStorageOptions,
-    fs: &PackStorageFs,
+    fs: Arc<PackStorageFs>,
   ) -> Result<ScopeValidateResult> {
-    self.ensure_meta(fs)?;
+    self.ensure_meta(fs.clone())?;
 
     // validate meta
     let meta = self.meta.expect_value();
@@ -185,8 +189,8 @@ impl PackScope {
     }
   }
 
-  fn validate_packs(&mut self, fs: &PackStorageFs) -> Result<bool> {
-    self.ensure_pack_keys(fs)?;
+  fn validate_packs(&mut self, fs: Arc<PackStorageFs>) -> Result<bool> {
+    self.ensure_pack_keys(fs.clone())?;
     let candidates = {
       let packs = self.get_pack_meta_pairs()?;
       packs
@@ -198,12 +202,12 @@ impl PackScope {
         })
         .collect_vec()
     };
-    let validate_results = block_on(unconstrained(batch_validate(candidates, &fs)))?;
+    let validate_results = block_on(unconstrained(batch_validate(candidates, fs)))?;
     Ok(validate_results.into_iter().all(|v| v))
   }
 
-  fn ensure_pack_keys(&mut self, fs: &PackStorageFs) -> Result<()> {
-    self.ensure_packs(fs)?;
+  fn ensure_pack_keys(&mut self, fs: Arc<PackStorageFs>) -> Result<()> {
+    self.ensure_packs(fs.clone())?;
     let candidates = {
       let packs_pairs = self.get_pack_meta_pairs()?;
       let pack_infos = packs_pairs
@@ -217,7 +221,7 @@ impl PackScope {
     };
     let read_key_results = block_on(unconstrained(batch_read_keys(
       candidates.iter().map(|i| i.2.to_owned()).collect_vec(),
-      &fs,
+      fs,
     )))?;
     let packs = self.packs.expect_value_mut();
     for (index, keys) in read_key_results.into_iter().enumerate() {
@@ -232,8 +236,8 @@ impl PackScope {
     Ok(())
   }
 
-  fn ensure_pack_contents(&mut self, fs: &PackStorageFs) -> Result<()> {
-    self.ensure_pack_keys(fs)?;
+  fn ensure_pack_contents(&mut self, fs: Arc<PackStorageFs>) -> Result<()> {
+    self.ensure_pack_keys(fs.clone())?;
 
     let candidates = {
       let packs_pairs = self.get_pack_meta_pairs()?;
@@ -260,7 +264,7 @@ impl PackScope {
     };
 
     let read_contents_result: Vec<Vec<Arc<Vec<u8>>>> = block_on(unconstrained(
-      batch_read_contents(candidates.iter().map(|i| i.2.to_owned()).collect_vec(), &fs),
+      batch_read_contents(candidates.iter().map(|i| i.2.to_owned()).collect_vec(), fs),
     ))?;
 
     let packs = self.packs.expect_value_mut();
@@ -277,19 +281,19 @@ impl PackScope {
     Ok(())
   }
 
-  fn ensure_meta(&mut self, fs: &PackStorageFs) -> Result<()> {
+  fn ensure_meta(&mut self, fs: Arc<PackStorageFs>) -> Result<()> {
     if matches!(self.meta, ScopeMetaState::Pending) {
       let meta = fs.read_scope_meta(ScopeMeta::get_path(&self.path))?;
       if let Some(meta) = meta {
         self.meta = ScopeMetaState::Value(meta);
       } else {
-        self.meta = ScopeMetaState::Value(ScopeMeta::new(&self.path, &self.options));
+        self.meta = ScopeMetaState::Value(ScopeMeta::new(&self.path, self.options.clone()));
       }
     }
     Ok(())
   }
 
-  fn ensure_packs(&mut self, fs: &PackStorageFs) -> Result<()> {
+  fn ensure_packs(&mut self, fs: Arc<PackStorageFs>) -> Result<()> {
     self.ensure_meta(fs)?;
 
     let meta = self.meta.expect_value();
@@ -345,10 +349,16 @@ impl PackScope {
     )
   }
 
-  pub fn save(
+  // pub fn update(&mut self, updates: HashMap<Vec<u8, Option<Vec<u8>>>>) {
+  //   if !self.loaded() {
+  //     return Err(error!("scope not loaded, run `get_all` first"));
+  //   }
+  // }
+
+  pub async fn save(
     &mut self,
-    updates: &mut HashMap<Vec<u8>, Option<Vec<u8>>>,
-    fs: &PackStorageFs,
+    updates: HashMap<Vec<u8>, Option<Vec<u8>>>,
+    fs: Arc<PackStorageFs>,
   ) -> Result<SavedScopeResult> {
     if !self.loaded() {
       return Err(error!("scope not loaded, run `get_all` first"));
@@ -472,7 +482,7 @@ impl PackScope {
     }
 
     // write and link new packs
-    for result in write_bucket_packs(new_pack_metas, new_packs, fs)? {
+    for result in write_bucket_packs(new_pack_metas, new_packs, fs.clone()).await? {
       writed_files.push(result.pack.path.clone());
       scope_packs[result.bucket_id].push(result.pack);
       scope_meta.packs[result.bucket_id].push(result.meta);

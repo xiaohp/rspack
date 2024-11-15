@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use futures::{future::join_all, TryFutureExt};
 use rspack_error::{error, Result};
@@ -7,7 +7,7 @@ use crate::pack::{PackKeys, PackStorageFs};
 
 pub async fn batch_read_contents(
   candidates: Vec<(PathBuf, PackKeys)>,
-  fs: &PackStorageFs,
+  fs: Arc<PackStorageFs>,
 ) -> Result<Vec<PackKeys>> {
   let tasks = candidates.into_iter().map(|(path, keys)| {
     let fs = fs.to_owned();

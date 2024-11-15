@@ -4,12 +4,13 @@ use std::{
   time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::PackStorageOptions;
+use crate::PackStorageOptions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackFileMeta {
   pub hash: String,
   pub name: String,
+  pub writed: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -22,7 +23,7 @@ pub struct ScopeMeta {
 }
 
 impl ScopeMeta {
-  pub fn new(dir: &PathBuf, options: &PackStorageOptions) -> Self {
+  pub fn new(dir: &PathBuf, options: Arc<PackStorageOptions>) -> Self {
     Self {
       path: Self::get_path(dir),
       buckets: options.buckets,

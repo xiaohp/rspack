@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use futures::{future::join_all, TryFutureExt};
 use rspack_error::{error, Result};
@@ -15,7 +15,7 @@ pub fn validate_pack(
   hash: &str,
   path: &PathBuf,
   keys: &PackKeys,
-  fs: &PackStorageFs,
+  fs: Arc<PackStorageFs>,
 ) -> Result<bool> {
   let pack_hash = get_pack_hash(path, keys, fs)?;
   Ok(*hash == pack_hash)
@@ -23,12 +23,12 @@ pub fn validate_pack(
 
 pub async fn batch_validate(
   candidates: Vec<PackValidateCandidate>,
-  fs: &PackStorageFs,
+  fs: Arc<PackStorageFs>,
 ) -> Result<Vec<bool>> {
   let tasks = candidates.into_iter().map(|pack| {
-    let fs = fs.to_owned();
+    let fs = fs.clone();
     tokio::spawn(async move {
-      match validate_pack(&pack.hash, &pack.path, &pack.keys, &fs) {
+      match validate_pack(&pack.hash, &pack.path, &pack.keys, fs) {
         Ok(res) => res,
         Err(_) => false,
       }
